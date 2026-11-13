@@ -1,0 +1,64 @@
+# picodaq configuration for the PicoScope 6402C (legacy ps6000 driver, 8-bit ADC).
+# Same as config_acquisition.yaml except the scope / channel sections.
+#   picodaq-check --config config_6402c.yaml
+#   picodaq-gui   --config config_6402c.yaml
+
+scope:
+  driver: ps6000          # psospa (3000E, via pypicosdk) | ps6000 (6402C/D, 6403C/D, 6404C/D)
+  # sdk_path: /Library/Frameworks/PicoSDK.framework/Libraries/libps6000   # only if not found
+
+channels:
+  # range: mV10 mV20 mV50 mV100 mV200 mV500 V1 V2 V5 V10 V20
+  # coupling: DC_1M (default) | AC | DC_50R (50 ohm: max +-5 V)
+  # bandwidth: full | 20MHz ;  analog_offset_v: shifts the baseline (V), e.g. -0.4 to use
+  #   the full range for positive pulses in mV500 (check the limits with the scope)
+  A: {enabled: true, range: mV500, coupling: DC_1M, bandwidth: 20MHz, analog_offset_v: 0.0}   # anode
+  B: {enabled: true, range: mV500, coupling: DC_1M, bandwidth: 20MHz, analog_offset_v: 0.0}   # cathode
+  C: {enabled: false, range: V2}
+  D: {enabled: false, range: V2}
+
+trigger:
+  enabled: true
+  source: A
+  threshold_mv: 30
+  direction: rising       # rising | falling | above | below
+  auto_trigger_ms: 0
+
+capture:
+  samples: 5000
+  sample_rate_hz: 20000000   # -> timebase 12, 19.53 MS/s (51.2 ns) on the 6000 series
+  pre_trigger_fraction: 0.2
+  total_waveforms: null
+  loop: poll
+  batch_timeout_s: 2.0
+
+output:
+  data_dir: data/%Y%m%d
+  base: tlbr6402c
+  start_id: 0
+  max_file_size_mb: 1024
+  rapid_block_captures: 32
+  compression: lzf
+
+processing:
+  anode: A
+  cathode: B
+  baseline_fraction: 0.8
+  shaper: {rise_us: 15.0, flat_us: 16.0}
+  amplitude: flattop
+  guard_frac: 0.15
+  flattop_window: [0.6, 0.9]
+  channels:
+    A: {polarity: 1, tau_us: 55.0}
+    B: {polarity: -1, tau_us: 17.0}
+
+ql:
+  waveforms_per_batch: 4
+  amp_max_v: 0.5
+  amp_bins: 512
+  amp2d_bins: 256
+  ratio_range: [0.0, 2.0]
+  ratio_bins: 200
+
+simulate: false
+sim_rate_hz: 600

@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picodaq"
+version = "0.1.0"
+description = "PicoScope 3416E rapid-block acquisition, quick-look GUI and shared pulse processing"
+requires-python = ">=3.10"
+dependencies = ["numpy", "h5py", "pyyaml"]
+
+[project.optional-dependencies]
+gui = ["PySide6", "pyqtgraph"]
+scope = ["pypicosdk"]
+analysis = ["scipy", "astropy", "matplotlib"]
+test = ["pytest"]
+all = ["PySide6", "pyqtgraph", "pypicosdk", "scipy", "astropy", "matplotlib", "pytest"]
+
+[project.scripts]
+picodaq-gui = "picodaq.gui:main"
+picodaq-acquire = "picodaq.acquisition:main"
+picodaq-check = "picodaq.hwcheck:main"
+picodaq-info = "picodaq.info:main"
+picodaq-analyze = "picodaq.analyze:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

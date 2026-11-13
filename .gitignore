@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv*/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# measured data and analysis output (keep them out of git)
+data/
+*.h5
+*.hdf5
+*.fits
+out*/
+/analysis/
+check*.json
+hwcheck_*.h5
+
+# macOS
+.DS_Store

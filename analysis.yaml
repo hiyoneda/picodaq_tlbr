@@ -1,0 +1,53 @@
+# picodaq-analyze run analysis.yaml
+# Keys left out take the defaults in src/picodaq/analyze.py (ANALYSIS_DEFAULTS).
+
+# Relative paths are taken from the folder of THIS file, so the repository can be
+# cloned anywhere. Layout assumed here:
+#   <somewhere>/picodaq/analysis.yaml   (this repository)
+#   <somewhere>/data/20260909/...       (measured data, not in git)
+# Another place: change data_root, or set the environment variable PICODAQ_DATA.
+data_root: ../data
+output_dir: analysis/20260909   # -> picodaq/analysis/20260909 (ignored by git)
+
+runs:                         # source name -> HDF5 files or directories, relative to data_root
+  Ba133: [20260909/run_Ba/data]
+  Eu152: [20260909/run_Eu/data]
+  Cs137: [20260909/run_Cs137/data]
+
+# Pulse processing. null = the settings stored in each run's first HDF5 file.
+# Files from the old run_acqusition.py have none, so set at least tau here
+# (check with: picodaq-analyze tau <file>).
+# On the Ba run of 2026-09-09 a 16 us flat top averaged over its late part
+# (0.6-0.9) gave 356 keV FWHM ~2.5 %, against ~5 % with the notebook's 12 us /
+# 0.15-0.85; tau mattered less (A 45-100 us, B 17-25 us all ~2.7 %).
+processing:
+  shaper: {rise_us: 15.0, flat_us: 16.0}
+  amplitude: flattop
+  flattop_window: [0.6, 0.9]
+  channels:
+    A: {polarity: 1, tau_us: 55.0}
+    B: {polarity: -1, tau_us: 17.0}
+
+max_events: null              # per file, for quick tests
+
+cuts: {bl_rms_max: 0.010, drift_max: 0.050, late_max: 0.050}
+
+depth:
+  source: Ba133               # run used to fit the correction
+  amp_window: [0.06, 0.14]    # V: contains Ba-133 356 keV in every CAR slice; the strongest
+                              # peak in each slice is fitted (fit_frac around it)
+  car_range: [0.25, 1.40]
+  car_bins: 12
+  car_ref: 1.0
+  degree: 3
+
+calibration:
+  model: linear               # linear0 | linear | quadratic
+  approx_kev_per_v: null      # null: from the strongest Cs137 / Ba133 peak
+  min_amp: 0.015              # V, ignore the threshold region when guessing
+  window_frac: 0.06
+  min_window_kev: 10
+  lines: {}                   # e.g. {Ba133: [81.0, 276.4, 302.85, 356.01, 383.85]}
+  method: two_step            # two_step | car2d: optional 2-D calibration E(a, CAR), fitted
+                              # to every line in every CAR slice; summary.txt compares both
+  car2d: {car_bins: 10, deg_off: 1, deg_gain: 3, quadratic: false}
