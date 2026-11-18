@@ -195,6 +195,7 @@ class Ps6000Backend:
             self.dt = dt_ns.value * 1e-9
             self.times = (np.arange(self.samples) - self.pre) * self.dt
             self.trigger_info_ok = True
+            self.last_overflow = None
         except Exception:
             self.close()
             raise
@@ -283,12 +284,14 @@ class Ps6000Backend:
                 break
             time.sleep(0.002)
         if n_done == 0:
+            self.last_overflow = None
             return None
         nsamp = c_uint32(self.samples)
         overflow = np.zeros(n_done, np.int16)
         _check(lib.ps6000GetValuesBulk(h, byref(nsamp), 0, n_done - 1, 1, RATIO_NONE, overflow.ctypes.data),
                "ps6000GetValuesBulk")
         m = int(nsamp.value)
+        self.last_overflow = (overflow.astype(np.int32) & 0xFF).astype(np.uint8)  # bit i = channel i
         data = {ch: self._volts(arr[:n_done, :m], ch) for ch, arr in bufs.items()}
         return data, self.times[:m].copy(), self._trigger_info(n_done)
 

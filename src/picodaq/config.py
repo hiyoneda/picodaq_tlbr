@@ -76,5 +76,9 @@ def load_config(source=None):
     return deep_merge(DEFAULTS, user)
 
 
+# bit of each channel in the over-range masks (Trigger/Overflow, backend.last_overflow)
+CHANNEL_BITS = {"A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5, "G": 6, "H": 7}
+
+
 def enabled_channels(config):
     return [name for name, value in config["channels"].items() if value.get("enabled")]

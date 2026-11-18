@@ -117,3 +117,33 @@ def test_simulator_without_triggers_respects_timeout_and_stop(config, realtime):
         t = time.monotonic()
         assert be.capture(100, stop_event=ev) is None
         assert time.monotonic() - t < 0.5
+
+
+def test_over_range_is_recorded_and_vetoed(config):
+    """Simulator with a +-100 mV anode range: large pulses saturate. The file
+    flags them, the QL message counts them, and the event file drops them from GOOD."""
+    pytest.importorskip("astropy")
+    from picodaq.events import EventFile
+
+    config["channels"]["A"]["range"] = "mV100"
+    config["capture"]["total_waveforms"] = 400
+    ql = queue.Queue(maxsize=1000)
+    run_acquisition(config, ql_queue=ql, mode="run")
+    msgs = []
+    while not ql.empty():
+        msgs.append(ql.get())
+    n_ql = sum(m["overflow"]["A"] for m in msgs if m.get("type") == "batch" and m.get("overflow"))
+    f = run_files(config["output"]["data_dir"])[0]
+    with WaveformReader(f) as r:
+        ov = r.overflow()
+        nA = r.overflow_count()["A"]
+        assert 20 < nA < r.n_events and r.overflow_count()["B"] == 0
+        assert n_ql == nA
+        vmax = np.abs(r.waveforms("A")).max(axis=1)
+        assert np.all(vmax[(ov & 1) == 1] >= 0.0999) and np.all(vmax[(ov & 1) == 0] < 0.1)
+    ef = EventFile.from_waveforms(f, verbose=False)
+    good = np.asarray(ef.events["GOOD"])
+    assert not good[np.asarray(ef.events["OVERFLOW"]) != 0].any()
+    assert ef.files["N_OVERFLOW"][0] == nA
+    ef.recompute_good(reject_overflow=False)
+    assert np.asarray(ef.events["GOOD"]).sum() > good.sum()

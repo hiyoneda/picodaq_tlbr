@@ -10,7 +10,7 @@ import traceback
 from pathlib import Path
 
 from .backends import make_backend
-from .config import load_config
+from .config import CHANNEL_BITS, load_config
 from .io import WaveformWriter
 from .shaping import processors_from_config
 from .timing import RateMeter
@@ -140,6 +140,9 @@ def run_acquisition(config, duration_min=None, stop_event=None, ql_queue=None,
                 continue
             data, times, trig = result
             n = next(iter(data.values())).shape[0]
+            over = getattr(backend, "last_overflow", None)
+            n_over = None if over is None else {ch: int(((over >> CHANNEL_BITS[ch]) & 1).sum())
+                                                for ch in channels}
 
             if ql is None:
                 ql = QuickLook(config, channels, times)
@@ -162,7 +165,7 @@ def run_acquisition(config, duration_min=None, stop_event=None, ql_queue=None,
                                             backend.serial, mode,
                                             model=getattr(backend, "model", "3416E MSO"))
                     log(f"opened {path.name}")
-                writer.append(data, trig, t0, t1, threshold)
+                writer.append(data, trig, t0, t1, threshold, overflow=over)
             acquired += n
 
             if ql_queue is not None:
@@ -170,7 +173,7 @@ def run_acquisition(config, duration_min=None, stop_event=None, ql_queue=None,
                        "file": path.name if save else "(not saved)",
                        "path": str(path.resolve()) if save else None,
                        "file_count": writer.count if writer is not None else 0,
-                       "threshold_mv": threshold, "rates": stats}
+                       "threshold_mv": threshold, "rates": stats, "overflow": n_over}
                 msg.update(ql.message(data))
                 _send(ql_queue, msg, block=False)
             else:
@@ -181,7 +184,9 @@ def run_acquisition(config, duration_min=None, stop_event=None, ql_queue=None,
                 else:
                     r = f", accepted {stats['accepted_rate']:.1f} Hz"
                 where = f"{path.name}: {writer.count}" if save else f"(not saved): {acquired}"
-                print(f"{where} waveforms{r}", flush=True)
+                o = "" if not n_over or not any(n_over.values()) else \
+                    ", OVER RANGE " + " ".join(f"{c}:{k}" for c, k in n_over.items() if k)
+                print(f"{where} waveforms{r}{o}", flush=True)
 
             if save and writer.count >= file_capacity:
                 writer.close()

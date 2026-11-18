@@ -22,6 +22,9 @@ def test_full_batch(backend):
     assert data["A"].shape == (16, 5000) and data["A"].dtype == np.float32
     assert times.size == 5000 and np.argmin(np.abs(times)) == 1000
     assert len(trig["timestamp"]) == 16 and trig["timestamp"].dtype == np.uint64
+    ov = backend.last_overflow
+    assert ov.dtype == np.uint8 and len(ov) == 16
+    assert ov[3] == 0b01 and ov[5] == 0b10 and ov[10] == 0b01 and ov[0] == 0  # A = bit 0, B = bit 1
 
 
 def test_timeout_returns_partial_batch(backend):
@@ -50,5 +53,13 @@ def test_simple_loop_and_threshold(backend):
     backend.loop = "simple"
     data, _, trig = backend.capture(4)
     assert data["B"].shape == (4, 5000) and trig is not None
+    assert backend.last_overflow is None  # not reported by the simple loop
     backend.set_threshold(80.4)
     assert backend.scope.thr == 80
+
+
+def test_overflow_bits():
+    from picodaq.backends import overflow_bits
+
+    np.testing.assert_array_equal(overflow_bits([[], ["A"], ["B", "A"], 4], 4), [0, 1, 3, 4])
+    assert overflow_bits([[]], 2) is None and overflow_bits(None, 1) is None

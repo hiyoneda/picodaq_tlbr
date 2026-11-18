@@ -4,15 +4,33 @@ capture(n, stop_event=None, timeout_s=None) returns (data, times, trig) or None:
     data  {channel: (m, samples) float32 [V]}, m <= n
     times (samples,) [s], 0 = trigger
     trig  {"timestamp", "missed", "status"} arrays (m,), or None if unavailable
+After each capture, backend.last_overflow is a (m,) uint8 bit mask of the channels
+that went over range somewhere in the record (bit i = channel i, A = bit 0),
+or None if the driver did not report it.
 """
 import ctypes
 import time
+import warnings
 
 import numpy as np
 
 from .calibration import LINES
-from .config import enabled_channels
+from .config import CHANNEL_BITS, enabled_channels
 from .timing import TS_MASK, TS_RESET
+
+
+def overflow_bits(overflow, n):
+    """pypicosdk get_values_bulk overflow (per capture: list of channel names, or an
+    int bit mask) -> (n,) uint8 bit mask; None if it does not match n captures."""
+    if overflow is None or len(overflow) < n:
+        return None
+    out = np.zeros(n, np.uint8)
+    for i, o in enumerate(list(overflow)[:n]):
+        if isinstance(o, (int, np.integer)):
+            out[i] = int(o) & 0xFF
+        else:
+            out[i] = sum(1 << CHANNEL_BITS[str(c).upper()] for c in o if str(c).upper() in CHANNEL_BITS)
+    return out
 
 
 def _trig_from_info(info):
@@ -43,6 +61,7 @@ class PicoBackend:
         self.samples = cap["samples"]
         self.pretrig = round(cap["pre_trigger_fraction"] * 100)
         self.loop = cap.get("loop", "poll")
+        self.last_overflow = None
         scope = psdk.psospa()
         resolution = getattr(psdk.RESOLUTION, f"_{config['scope']['resolution']}")
         scope.open_unit(resolution=resolution)
@@ -93,6 +112,7 @@ class PicoBackend:
                 timebase=self.timebase, samples=self.samples, captures=n,
                 output_unit="v", time_unit="s", pre_trig_percent=self.pretrig,
             )
+            self.last_overflow = None  # not reported by run_simple_rapid_block_capture
             return self._volts(buffers), np.asarray(times), self._trigger_info(n)
 
         # same setup as run_simple_rapid_block_capture, but IsReady is polled here
@@ -115,8 +135,12 @@ class PicoBackend:
                 break
             time.sleep(0.002)
         if n_done == 0:
+            self.last_overflow = None
             return None
-        actual, _ = scope.get_values_bulk(self.samples, 0, n_done - 1, wait_for_ready=False)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # pypicosdk warns once per over-range capture
+            actual, over = scope.get_values_bulk(self.samples, 0, n_done - 1, wait_for_ready=False)
+        self.last_overflow = overflow_bits(over, n_done)
         buffers = {ch: arr[:n_done, :actual] for ch, arr in buffers.items()}
         buffers = scope._adc_to_(buffers, unit="v")
         times = scope.get_time_axis(self.timebase, actual, pre_trig_percent=self.pretrig, unit="s")
@@ -177,6 +201,11 @@ class SimBackend:
         self.reset_next = True
         self.realtime = bool(config.get("sim_realtime", True))
         self.t_virtual = 0.0
+        from .ps6000 import RANGE_MV
+
+        self.range_v = {ch: RANGE_MV.get(config["channels"][ch].get("range", "V2"), 2000) / 1000
+                        for ch in self.channels}
+        self.last_overflow = None
 
     def set_threshold(self, threshold_mv):
         self.threshold = threshold_mv * 1e-3
@@ -253,6 +282,7 @@ class SimBackend:
             end = events[-1][0] + self.post if len(events) == n else limit
             self.t_virtual = max(self.t_virtual, end)
         if not events:
+            self.last_overflow = None
             return None
         k = len(events)
         t_ev = np.array([ev[0] for ev in events])
@@ -265,9 +295,14 @@ class SimBackend:
         sig = [csa_response(t, amp_a, t_col, self.tau[0]),
                -csa_response(t, amp_c, t_col, self.tau[min(1, len(self.tau) - 1)])]
         data = {}
+        over = np.zeros(k, np.uint8)
         for i, ch in enumerate(self.channels):
             s = sig[i] if i < 2 else 0.0
-            data[ch] = (s + self.rng.normal(0, 4e-3, (k, self.samples))).astype(np.float32)
+            v = (s + self.rng.normal(0, 4e-3, (k, self.samples))).astype(np.float32)
+            r = np.float32(self.range_v[ch])
+            over |= (np.abs(v).max(axis=1) >= r).astype(np.uint8) << CHANNEL_BITS[ch]
+            data[ch] = np.clip(v, -r, r)  # the ADC saturates at the range
+        self.last_overflow = over
         status = np.zeros(k, np.int64)
         if self.reset_next:
             status[0] = TS_RESET

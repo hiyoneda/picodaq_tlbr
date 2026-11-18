@@ -128,6 +128,7 @@ TlBr/
 - **Save to / Name**：保存先フォルダとファイル名の頭（`output.data_dir` と `output.base` の値が初期値）。止まっている間だけ変えられ、Start 時に反映されます。
   - ファイル名は Run なら `<Name>_NNNNN.h5`、Tune なら `<Name>_tune_NNNNN.h5`。NNNNN は既存のファイルを避けて自動で増えるので、上書きはしません。
   - Name に使えるのは英数字と `.` `_` `-` だけです（`/` や空白は不可）。フォルダには `%Y%m%d` などの日付の書式が使えます。
+- **over range**（ステータス行の右端）：レンジを超えたイベントの数と割合をチャンネルごとに数えます。1 つでもあると、ステータス行が赤くなります。Tune のうちに、0 になるようにレンジを決めてください。振り切れた波形も保存はされ、`Trigger/Overflow` に印が付きます。
   - その下の太字の行に、止まっている間は **次に作るファイル**、取得中は **書き込み中のファイル**（フルパスと波形数）が出ます。1 GB でファイルが切り替わると表示も変わります。
 - **Batch**：rapid blockの1回あたりのイベント数です。
 - **Batch timeout**：これを過ぎたら、その時点までに取れた分を読み出します。低レートのときに、QLの更新とStopの応答をよくするためのものです。
@@ -164,6 +165,7 @@ picodaq-acquire --sim                  # シミュレータ
 | `Trigger/Timestamp` | スコープのクロックのtick（× `TimestampUnitS` で秒）、56 bitでラップアラウンド |
 | `Trigger/MissedTriggers` | 前のセグメントから取りこぼしたトリガの数 |
 | `Trigger/Status` | `0x01000000` = タイムスタンプがリセットされた、`-1` = 情報なし |
+| `Trigger/Overflow` | レンジを超えた（振り切れた）チャンネルのビット（A = 1、B = 2、C = 4、D = 8、0 = なし）。スコープが報告しない場合は attrs `OverflowAvailable = 0` |
 | `BatchInfo` | (バッチ数, 4)：開始unix時刻、終了unix時刻、イベント数、閾値 [mV] |
 
 旧 `run_acqusition.py` のファイル（`Time` と `Waveforms` だけ）も `WaveformReader` で読めます。
@@ -203,8 +205,10 @@ picodaq-analyze energy Ba133_events.fits Eu152_events.fits --depth depth.fits --
 ### 6-3. FITS の中身
 | 拡張 | 中身 |
 |---|---|
-| `EVENTS` | `FILE_ID` `EVENT_ID` `TIME`[s] `EPOCH`、チャンネルごとの `AMP_X`[V] `BASE_X` `BLRMS_X` `BLSLOPE_X` `VMAX_X` `LATE_X`、`GOOD` `CAR`、補正後の `AMP_CORR`[V] `DEPTH_OK` `ENERGY`[keV]。header に整形とカットのパラメータ、HISTORY に processing の YAML |
-| `FILES` | 元の HDF5 ごとの名前、イベント数、実時間、ライブタイム、入力レート |
+| `EVENTS` | `FILE_ID` `EVENT_ID` `TIME`[s] `EPOCH`、チャンネルごとの `AMP_X`[V] `BASE_X` `BLRMS_X` `BLSLOPE_X` `VMAX_X` `LATE_X`、`OVERFLOW`（上のビット）、`GOOD` `CAR`、補正後の `AMP_CORR`[V] `DEPTH_OK` `ENERGY`[keV]。header に整形とカットのパラメータ、HISTORY に processing の YAML |
+| `FILES` | 元の HDF5 ごとの名前、イベント数、実時間、ライブタイム、入力レート、振り切れたイベント数 `N_OVERFLOW`（記録なしは −1） |
+
+`GOOD` は、ベースライン RMS・ドリフト・遅れパルスのカットに加えて、anode か cathode が振り切れたイベントを除きます。振り切れも含めたいときは `cuts: {reject_overflow: false}`（`analysis.yaml`）か `ef.recompute_good(reject_overflow=False)` です。11/18 より前に取ったファイルには記録がないので、この除外は効きません。
 | `DEPTH` | CAR スライスごとのピーク位置と、header に多項式係数・CAR 範囲・基準 |
 | `CALIB` | 線源・ライン・波高・幅・残差・FWHM と、header に `MODEL` `C0` `C1` `C2` |
 

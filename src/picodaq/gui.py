@@ -344,6 +344,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.save_path = None
         self.saving = False
         self.last = None  # last rate stats
+        self.n_over = {}  # over-range events per channel (None: not reported)
         self.threshold_now = None
         self.trigger_info = None
         self.run_t0 = time.time()
@@ -495,6 +496,12 @@ class MainWindow(QtWidgets.QMainWindow):
             self.rate_t.append(t_rel)
             self.rate_in.append(stats["input_rate"])
             self.rate_acc.append(stats["accepted_rate"])
+            ov = msg.get("overflow")
+            if ov is None:
+                self.n_over = None
+            elif self.n_over is not None:
+                for ch, k in ov.items():
+                    self.n_over[ch] = self.n_over.get(ch, 0) + k
             self.file = msg["file"]
             self.file_count = msg["file_count"]
             self.save_path = msg.get("path")
@@ -540,10 +547,17 @@ class MainWindow(QtWidgets.QMainWindow):
     def update_status(self):
         state = f"{self.run_mode.upper()}" if self.running else "idle"
         el = int(time.time() - self.run_t0) if self.running else 0
+        if self.n_over is None:
+            over = "over range n/a"
+        else:
+            over = "over range " + (" ".join(f"{ch} {k} ({100 * k / max(self.total, 1):.1f}%)"
+                                            for ch, k in sorted(self.n_over.items())) or "0")
         self.status.setText(
             f"{state} | {self.file} ({self.file_count} wf) | total {self.total} | "
-            f"QL {self.hists.events} | elapsed {el // 3600:02d}:{el // 60 % 60:02d}:{el % 60:02d}"
+            f"QL {self.hists.events} | elapsed {el // 3600:02d}:{el // 60 % 60:02d}:{el % 60:02d} | {over}"
         )
+        bad = bool(self.n_over) and any(self.n_over.values())
+        self.status.setStyleSheet("color: #c03030;" if bad else "")
         s = self.last
         if s is None:
             self.rate_label.setText("")

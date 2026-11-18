@@ -119,6 +119,8 @@ class FakeLib:
                 # step of ch*1000 + seg counts at the trigger point
                 arr[:] = 0
                 arr[self.pre:] = 1000 * (ch + 1) + seg
+        ov = np.ctypeslib.as_array((ctypes.c_int16 * (last - first + 1)).from_address(overflow_addr))
+        ov[:] = [0b10 if s % 5 == 2 else 0 for s in range(first, last + 1)]  # channel B
         return OK
 
     def ps6000GetTriggerInfoBulk(self, h, info_ref, first, last):

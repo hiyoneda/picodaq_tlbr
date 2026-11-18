@@ -79,6 +79,16 @@ def run_check(config, pulser_hz=None, batch=32, n_batches=10, high_threshold_mv=
         rep.add("first batch", PASS if n == batch else WARN,
                 f"{n}/{batch} waveforms in {t1 - t0:.2f} s, dt = {dt * 1e9:.2f} ns, "
                 f"samples = {times.size}")
+        over = getattr(be, "last_overflow", None)
+        if over is None:
+            rep.add("over range", INFO, "対象外: the driver did not report over-range (simple loop?)")
+        else:
+            from .config import CHANNEL_BITS
+
+            k = {ch: int(((over >> CHANNEL_BITS[ch]) & 1).sum()) for ch in data}
+            rep.add("over range", WARN if any(k.values()) else PASS,
+                    ", ".join(f"{ch} {v}/{n}" for ch, v in k.items())
+                    + (" - pulses exceed the range: widen it or lower the gain" if any(k.values()) else ""))
         for ch, wf in data.items():
             bad = not np.all(np.isfinite(wf))
             rep.add(f"data {ch}", FAIL if bad else PASS,

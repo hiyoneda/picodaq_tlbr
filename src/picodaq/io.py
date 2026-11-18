@@ -8,6 +8,8 @@ Layout (one file = up to output.max_file_size_mb of waveforms):
     Trigger/Timestamp        (n,) u8             scope ticks, 56-bit
     Trigger/MissedTriggers   (n,) u8
     Trigger/Status           (n,) i8             -1 = not available
+    Trigger/Overflow         (n,) u1             over-range bit mask, bit i = channel i (A = 0);
+                                                 attrs OverflowAvailable = 0 if not reported
     BatchInfo                (n_batches, 4) f8   t_start_unix, t_end_unix, n, threshold_mv
 Files written by the original run_acqusition.py have only Time and Waveforms;
 WaveformReader handles both.
@@ -39,6 +41,7 @@ class WaveformWriter:
         a["ActualSampleRateHz"] = 1.0 / float(times[1] - times[0])
         a["Waveforms"] = 0
         a["MissedTriggersAvailable"] = 1  # 0 for the ps6000 driver (no missedTriggers)
+        a["OverflowAvailable"] = 1  # 0 once a batch came without over-range information
         self.file.create_dataset("Time", data=times)
         group = self.file.create_group("Waveforms")
         chunk_events = min(output["rapid_block_captures"], 16)
@@ -53,8 +56,9 @@ class WaveformWriter:
         self.trig = {
             name: trig.create_dataset(name, shape=(0,), maxshape=(None,), dtype=dt, chunks=(4096,))
             for name, dt in (("Timestamp", np.uint64), ("MissedTriggers", np.uint64),
-                             ("Status", np.int64))
+                             ("Status", np.int64), ("Overflow", np.uint8))
         }
+        self.trig["Overflow"].attrs["Bits"] = "bit i = channel i (A=0, B=1, C=2, D=3): over range in the record"
         self.trig["Timestamp"].attrs["Unit"] = "ticks of TimestampUnitS, 56-bit wrapping counter"
         self.batches = self.file.create_dataset(
             "BatchInfo", shape=(0, 4), maxshape=(None, 4), dtype=np.float64, chunks=(256, 4)
@@ -65,7 +69,8 @@ class WaveformWriter:
     def count(self):
         return next(iter(self.data.values())).shape[0]
 
-    def append(self, buffers, trig, t_start, t_end, threshold_mv):
+    def append(self, buffers, trig, t_start, t_end, threshold_mv, overflow=None):
+        """overflow: (count,) uint8 over-range bit mask, or None if not reported."""
         count = next(iter(buffers.values())).shape[0]
         start = self.count
         for ch, d in self.data.items():
@@ -77,7 +82,12 @@ class WaveformWriter:
         elif trig.get("missed") is None:
             trig = dict(trig, missed=np.zeros(count, np.uint64))
             self.file.attrs["MissedTriggersAvailable"] = 0
-        for name, key in (("Timestamp", "timestamp"), ("MissedTriggers", "missed"), ("Status", "status")):
+        if overflow is None or len(overflow) != count:
+            overflow = np.zeros(count, np.uint8)
+            self.file.attrs["OverflowAvailable"] = 0
+        trig = dict(trig, overflow=overflow)
+        for name, key in (("Timestamp", "timestamp"), ("MissedTriggers", "missed"), ("Status", "status"),
+                          ("Overflow", "overflow")):
             d = self.trig[name]
             d.resize((start + count,))
             d[-count:] = trig[key]
@@ -162,6 +172,23 @@ class WaveformReader:
         missed = g["MissedTriggers"][:] if self.missed_available else None
         return {"timestamp": g["Timestamp"][:], "missed": missed,
                 "status": g["Status"][:]}
+
+    def overflow(self):
+        """(n,) uint8 over-range bit mask (bit i = channel i, A = 0), or None
+        for files without it (older files, simple loop)."""
+        f = self.file
+        if "Trigger" not in f or "Overflow" not in f["Trigger"] or not f.attrs.get("OverflowAvailable", 0):
+            return None
+        return f["Trigger"]["Overflow"][:]
+
+    def overflow_count(self):
+        """{channel: number of over-range events}, or None."""
+        ov = self.overflow()
+        if ov is None:
+            return None
+        from .config import CHANNEL_BITS
+
+        return {ch: int(((ov >> CHANNEL_BITS[ch]) & 1).sum()) for ch in self.channels}
 
     def event_times(self):
         """(t [s] since the first event of the epoch, epoch) per event, or None."""

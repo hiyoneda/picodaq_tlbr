@@ -83,6 +83,7 @@ def test_full_batch_values_and_timestamps(cfg6402, fake):
     d = np.diff(trig["timestamp"].astype(np.int64)) * b.dt
     assert np.allclose(d, 1 / fake.rate, rtol=1e-3)
     assert ("RunBlock", 1000, 4000, 12, 1) in fake.calls
+    np.testing.assert_array_equal(b.last_overflow, [0b10 if i % 5 == 2 else 0 for i in range(16)])
     b.close()
 
 

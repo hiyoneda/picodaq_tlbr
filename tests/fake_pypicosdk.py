@@ -29,7 +29,9 @@ class psospa:
     def get_no_of_captures(self): return self._done()
     def get_values_bulk(self, samples, a, b, wait_for_ready=True):
         for c, arr in self.bufs.items(): arr[a:b + 1] = (c + 1) * 100
-        return samples, []
+        # like pypicosdk: per capture the list of channel names that went over range
+        over = [(["A"] if i % 7 == 3 else []) + (["B"] if i % 11 == 5 else []) for i in range(b + 1)]
+        return samples, over
     def _adc_to_(self, buffers, unit): return {c: v.astype(np.float64) / 32512 * 2 for c, v in buffers.items()}
     def get_time_axis(self, tb, n, pre_trig_percent, unit): return (np.arange(n) - n * pre_trig_percent // 100) * 50e-9
     def get_trigger_info(self, first, n):

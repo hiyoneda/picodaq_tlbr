@@ -24,14 +24,28 @@ import yaml
 
 from .calibration import EnergyCalibration
 from .carcal import CarCalibration
-from .config import load_config
+from .config import CHANNEL_BITS, load_config
 from .depth import DepthCorrection
 from .io import WaveformReader
 from .shaping import processors_from_config, quality_mask
 
 FEATURE_COLUMNS = {"amp": ("AMP", "V"), "baseline": ("BASE", "V"), "bl_rms": ("BLRMS", "V"),
                    "bl_slope": ("BLSLOPE", None), "vmax": ("VMAX", "V"), "late": ("LATE", "V")}
-DEFAULT_CUTS = {"bl_rms_max": 0.010, "drift_max": 0.050, "late_max": 0.050}
+DEFAULT_CUTS = {"bl_rms_max": 0.010, "drift_max": 0.050, "late_max": 0.050,
+                "reject_overflow": True}  # GOOD = False if anode or cathode went over range
+
+
+def _good(features_by_ch, overflow, channels, samples, cuts):
+    """Quality cut of shaping.quality_mask on every channel + over-range veto."""
+    cuts = dict(cuts)
+    reject = cuts.pop("reject_overflow", True)
+    good = np.ones(len(overflow), bool)
+    for ch in channels:
+        good &= quality_mask(features_by_ch[ch], samples, **cuts)
+    if reject:
+        bits = sum(1 << CHANNEL_BITS[ch] for ch in channels)
+        good &= (np.asarray(overflow).astype(np.uint8) & bits) == 0
+    return good
 
 
 def _expand(paths):
@@ -88,13 +102,14 @@ class EventFile:
                 t["TIME"] = times[0][:n] if times is not None else np.full(n, np.nan)
                 t["TIME"].unit = "s"
                 t["EPOCH"] = (times[1][:n] if times is not None else np.zeros(n)).astype(np.int16)
-                good = np.ones(n, bool)
                 for ch in r.channels:
                     for key, (name, unit) in FEATURE_COLUMNS.items():
                         t[f"{name}_{ch}"] = feats[ch][key].astype(np.float32)
                         if unit:
                             t[f"{name}_{ch}"].unit = unit
-                    good &= quality_mask(feats[ch], r.samples, **cuts)
+                ov = r.overflow()
+                t["OVERFLOW"] = (ov[:n] if ov is not None else np.zeros(n)).astype(np.uint8)
+                good = _good(feats, t["OVERFLOW"], r.channels, r.samples, cuts)
                 t["GOOD"] = good
                 a, c = feats[anode]["amp"], feats[cathode]["amp"]
                 with np.errstate(divide="ignore", invalid="ignore"):
@@ -104,6 +119,7 @@ class EventFile:
                 rows.append({"FILE_ID": fid, "FILENAME": str(path), "N_EVENTS": n,
                              "N_IN_FILE": r.n_events, "RUN_MODE": str(r.run_mode),
                              "SERIAL": str(r.serial), "DT": r.dt,
+                             "N_OVERFLOW": int((t["OVERFLOW"] != 0).sum()) if ov is not None else -1,
                              "REAL_TIME": s.get("real_time_s", np.nan),
                              "LIVE_TIME": s.get("live_time_s", np.nan),
                              "INPUT_RATE": s.get("input_rate", np.nan),
@@ -141,11 +157,13 @@ class EventFile:
 
     def recompute_good(self, **cuts):
         """Re-apply the quality cuts with new limits (no reshaping needed)."""
-        cuts = {**self.meta["cuts"], **cuts}
-        good = np.ones(len(self.events), bool)
-        for ch in (self.anode, self.cathode):
-            f = {k: np.asarray(self.events[f"{n}_{ch}"]) for k, (n, _) in FEATURE_COLUMNS.items()}
-            good &= quality_mask(f, int(self.meta["samples"]), **cuts)
+        cuts = {**DEFAULT_CUTS, **self.meta["cuts"], **cuts}
+        chans = (self.anode, self.cathode)
+        feats = {ch: {k: np.asarray(self.events[f"{n}_{ch}"]) for k, (n, _) in FEATURE_COLUMNS.items()}
+                 for ch in chans}
+        ov = (np.asarray(self.events["OVERFLOW"]) if "OVERFLOW" in self.events.colnames
+              else np.zeros(len(self.events), np.uint8))
+        good = _good(feats, ov, chans, int(self.meta["samples"]), cuts)
         self.events["GOOD"] = good
         self.meta["cuts"] = cuts
         return good

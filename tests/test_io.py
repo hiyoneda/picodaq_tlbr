@@ -80,3 +80,22 @@ def test_run_files_excludes_tune(tmp_path):
     for name in ("tlbr_00000.h5", "tlbr_00001.h5", "tlbr_tune_00000.h5", "other.h5"):
         (tmp_path / name).touch()
     assert [p.name for p in run_files(tmp_path)] == ["tlbr_00000.h5", "tlbr_00001.h5"]
+
+
+def test_overflow_roundtrip(tmp_path, config):
+    t = _times()
+    path = tmp_path / "o.h5"
+    trig = {"timestamp": np.arange(4, dtype=np.uint64), "missed": np.zeros(4, np.uint64),
+            "status": np.zeros(4, np.int64)}
+    data = {ch: np.zeros((4, t.size), np.float32) for ch in "AB"}
+    with WaveformWriter(path, ["A", "B"], t.size, t, config, "SER") as w:
+        w.append(data, trig, 0, 1, 30, overflow=np.array([0, 1, 2, 3], np.uint8))
+    with WaveformReader(path) as r:
+        np.testing.assert_array_equal(r.overflow(), [0, 1, 2, 3])
+        assert r.overflow_count() == {"A": 2, "B": 2}
+    # a batch without over-range information makes the whole file "not available"
+    with WaveformWriter(tmp_path / "p.h5", ["A", "B"], t.size, t, config, "SER") as w:
+        w.append(data, trig, 0, 1, 30, overflow=np.zeros(4, np.uint8))
+        w.append(data, trig, 1, 2, 30)
+    with WaveformReader(tmp_path / "p.h5") as r:
+        assert r.overflow() is None and r.overflow_count() is None

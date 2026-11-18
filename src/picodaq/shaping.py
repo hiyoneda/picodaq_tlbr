@@ -236,8 +236,11 @@ def processors_from_config(processing, channels, dt, trigger_index):
     return {ch: ChannelProcessor.from_config(processing, ch, dt, trigger_index) for ch in channels}
 
 
-def quality_mask(features, samples, bl_rms_max=0.010, drift_max=0.050, late_max=0.050):
-    """Notebook quality cut: baseline RMS, baseline drift over the record, late pulse."""
+def quality_mask(features, samples, bl_rms_max=0.010, drift_max=0.050, late_max=0.050,
+                 reject_overflow=None):
+    """Notebook quality cut: baseline RMS, baseline drift over the record, late pulse.
+    (reject_overflow is accepted so a whole cuts dict can be passed; the over-range
+    veto itself needs the file's Trigger/Overflow, see events.EventFile.)"""
     return (
         (features["bl_rms"] < bl_rms_max)
         & (np.abs(features["bl_slope"]) * samples < drift_max)

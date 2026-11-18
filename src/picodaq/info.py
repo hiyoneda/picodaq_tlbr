@@ -35,6 +35,12 @@ def summarize(path, process=0, config=None):
                          + ("" if r.missed_available else "  (no missedTriggers in this file)"))
         else:
             lines.append("  trigger info: not in this file")
+        oc = r.overflow_count()
+        if oc is None:
+            lines.append("  over range: not recorded in this file")
+        else:
+            lines.append("  over range: " + ", ".join(f"{ch} {k} ({100 * k / max(r.n_events, 1):.2f} %)"
+                                                      for ch, k in oc.items()))
         if process:
             cfg = load_config(config if config is not None else r.config)
             proc = processors_from_config(cfg["processing"], r.channels, r.dt, r.trigger_index)
