@@ -100,10 +100,29 @@ class PicoBackend:
         }
 
     def _trigger_info(self, n):
+        """Trigger info of segments 0 .. n-1.
+
+        psospaGetTriggerInfo(handle, info*, firstSegmentIndex, segmentCount) takes the
+        NUMBER of segments. pypicosdk 1.7.5 get_trigger_info passes the last index
+        (first + n - 1) instead, so the last segment of every batch came back empty
+        (Timestamp = 0, MissedTriggers = 0). Fixed upstream after 1.7.5 (pyPicoSDK #189).
+        The driver is called here the same way pypicosdk calls it, with the count n,
+        so this works with either pypicosdk version."""
+        scope = self.scope
         try:
-            return _trig_from_info(self.scope.get_trigger_info(0, n))
+            info = (self.psdk.PICO_TRIGGER_INFO * n)()
+            scope._call_attr_function("GetTriggerInfo", scope.handle, ctypes.byref(info), 0, n)
         except Exception:
             return None
+        rows = [{"status": i.status_, "segmentIndex": i.segmentIndex_,
+                 "missedTriggers": i.missedTriggers_, "timeStampCounter": i.timeStampCounter_}
+                for i in info]
+        seg = [int(r["segmentIndex"]) for r in rows]
+        if seg != list(range(n)) and not getattr(self, "_seg_warned", False):
+            # an entry the driver did not fill stays all zero (segmentIndex 0)
+            self._seg_warned = True
+            warnings.warn(f"trigger info: segment indices {seg} are not 0..{n - 1}")
+        return _trig_from_info(rows)
 
     def capture(self, n, stop_event=None, timeout_s=None):
         scope = self.scope

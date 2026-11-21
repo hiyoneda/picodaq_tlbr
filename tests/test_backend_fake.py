@@ -63,3 +63,23 @@ def test_overflow_bits():
 
     np.testing.assert_array_equal(overflow_bits([[], ["A"], ["B", "A"], 4], 4), [0, 1, 3, 4])
     assert overflow_bits([[]], 2) is None and overflow_bits(None, 1) is None
+
+
+def test_trigger_info_covers_every_segment(fake_pypicosdk, config):
+    """Every segment of a batch gets its trigger info, the last one included
+    (pypicosdk 1.7.5 get_trigger_info left the last one empty)."""
+    from picodaq.backends import PicoBackend
+
+    config["simulate"] = False
+    b = PicoBackend(config)
+    for kw in ({}, {"timeout_s": 0.05}):  # full batch, then a partial one (200 Hz, 0.05 s)
+        data, _, trig = b.capture(16, **kw)
+        n = data["A"].shape[0]
+        assert len(trig["timestamp"]) == n
+        assert np.all(trig["timestamp"] > 0)  # nothing left at 0
+        np.testing.assert_array_equal(trig["timestamp"], 1000 + 100000 * np.arange(n))
+        assert b.scope.trigger_info_calls[-1] == (0, n)  # count, not last index
+    # the old call through pypicosdk 1.7.5 leaves the last entry empty: what the fix avoids
+    old = b.scope.get_trigger_info(0, 16)
+    assert old[-1]["timeStampCounter"] == 0 and old[-2]["timeStampCounter"] > 0
+    b.close()
