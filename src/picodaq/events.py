@@ -109,7 +109,10 @@ class EventFile:
                             t[f"{name}_{ch}"].unit = unit
                 ov = r.overflow()
                 t["OVERFLOW"] = (ov[:n] if ov is not None else np.zeros(n)).astype(np.uint8)
-                good = _good(feats, t["OVERFLOW"], r.channels, r.samples, cuts)
+                # quality cuts and over-range veto on the anode and cathode only (as in
+                # recompute_good): an extra channel such as an external trigger (TTL on
+                # C) must not reject the events
+                good = _good(feats, t["OVERFLOW"], (anode, cathode), r.samples, cuts)
                 t["GOOD"] = good
                 a, c = feats[anode]["amp"], feats[cathode]["amp"]
                 with np.errstate(divide="ignore", invalid="ignore"):

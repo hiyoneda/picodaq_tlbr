@@ -41,6 +41,11 @@ def _trig_from_info(info):
     }
 
 
+# config "coupling" -> pypicosdk COUPLING (same names as the 6402C config).
+# 3000E: 50 ohm is DC only, ranges up to +-5 V.
+COUPLING_3000E = {"DC_1M": "DC", "DC": "DC", "AC": "AC", "DC_50R": "DC_50OHM"}
+
+
 class PicoBackend:
     driver = "psospa"
     """PicoScope 3000E (psospa driver) via pypicosdk.
@@ -69,9 +74,14 @@ class PicoBackend:
         try:
             self.channels = enabled_channels(config)
             for name in self.channels:
+                ch = config["channels"][name]
+                kw = {}
+                if "coupling" in ch:  # only when given: otherwise the driver default (1 MOhm DC)
+                    kw["coupling"] = getattr(psdk.COUPLING, COUPLING_3000E[ch["coupling"]])
                 scope.set_channel(
                     channel=getattr(psdk.CHANNEL, name),
-                    range=getattr(psdk.RANGE, config["channels"][name]["range"]),
+                    range=getattr(psdk.RANGE, ch["range"]),
+                    **kw,
                 )
             self.trigger_cfg = dict(config["trigger"])
             if self.trigger_cfg["enabled"]:

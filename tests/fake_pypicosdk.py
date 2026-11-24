@@ -5,6 +5,7 @@ RESOLUTION = types.SimpleNamespace(_10BIT=10)
 CHANNEL = types.SimpleNamespace(A=0, B=1, C=2, D=3)
 RANGE = types.SimpleNamespace(V2=9)
 SAMPLE_RATE = types.SimpleNamespace(MSPS=1)
+COUPLING = types.SimpleNamespace(AC=0, DC=1, DC_50OHM=50)
 RATE = 200.0  # triggers / s
 
 
@@ -17,7 +18,9 @@ class psospa:
     handle = 1
     def __init__(self): self.trigger_info_calls = []
     def open_unit(self, resolution): self.ch = []
-    def set_channel(self, channel, range): self.ch.append(channel)
+    def set_channel(self, channel, range, **kw):
+        self.ch.append(channel); self.coupling = getattr(self, 'coupling', {})
+        if 'coupling' in kw: self.coupling[channel] = kw['coupling']
     def set_simple_trigger(self, channel, threshold, auto_trigger): self.thr = threshold
     def sample_rate_to_timebase(self, rate, unit): return 3
     def get_unit_serial(self): return "FAKE/0001"

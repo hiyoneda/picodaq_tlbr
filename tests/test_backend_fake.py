@@ -83,3 +83,18 @@ def test_trigger_info_covers_every_segment(fake_pypicosdk, config):
     old = b.scope.get_trigger_info(0, 16)
     assert old[-1]["timeStampCounter"] == 0 and old[-2]["timeStampCounter"] > 0
     b.close()
+
+
+def test_coupling_50_ohm(fake_pypicosdk, config):
+    """channels.<X>.coupling is passed to set_channel; default stays 1 MOhm DC."""
+    from picodaq.backends import PicoBackend
+
+    config["simulate"] = False
+    config["channels"]["C"] = {"enabled": True, "range": "V2", "coupling": "DC_50R"}
+    b = PicoBackend(config)
+    try:
+        cp = b.scope.coupling
+        assert cp[fake_pypicosdk.CHANNEL.C] == fake_pypicosdk.COUPLING.DC_50OHM
+        assert fake_pypicosdk.CHANNEL.A not in cp  # not given: driver default
+    finally:
+        b.close()
